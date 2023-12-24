@@ -10,10 +10,21 @@ class UserProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = '__all__'
 
+class ProductImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductImage
+        fields = ('image',)
+
 class ProductSerializer(serializers.ModelSerializer):
+    images = ProductImageSerializer(many=True, read_only=True)
+
     class Meta:
         model = Product
         fields = '__all__'
+# class ProductSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Product
+#         fields = '__all__'
 
 class CartSerializer(serializers.ModelSerializer):
     class Meta:
@@ -46,10 +57,10 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username']
 
-class ProductImageSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductImage
-        fields = ['id', 'image']
+# class ProductImageSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = ProductImage
+#         fields = ['id', 'image']
 
 class ProductImageDetailSerializer(serializers.ModelSerializer):
     class Meta:

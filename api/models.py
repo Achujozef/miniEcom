@@ -39,13 +39,17 @@ class ProductImage(models.Model):
 class Cart(models.Model):
     user = models.ForeignKey(DjangoUser, on_delete=models.CASCADE)
     products = models.ManyToManyField(Product, through='CartItem')
-    total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    total_price = models.DecimalField(max_digits=10, decimal_places=2,default=0.00)
 
 class CartItem(models.Model):
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.cart.total_price = sum(item.product.price * item.quantity for item in self.cart.cartitem_set.all())
+        self.cart.save()
 
 class Order(models.Model):
     STATUS_CHOICES = [

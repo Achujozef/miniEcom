@@ -13,15 +13,16 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import AllowAny
 from django.contrib.auth.models import User
 from rest_framework.generics import ListAPIView
+from django.db.models import Sum
 
-class UserProfileView(APIView):
+class UserProfileView(APIView): #Tested
     permission_classes = [IsAuthenticated]
     def get(self, request):
         user_profile = UserProfile.objects.get(user=request.user)
         serializer = UserProfileSerializer(user_profile)
         return Response(serializer.data)
 
-class RegisterView(APIView):
+class RegisterView(APIView):#Tested
     permission_classes = [AllowAny]
     def post(self, request):
         username = request.data.get('username')
@@ -40,13 +41,22 @@ class RegisterView(APIView):
         }
         return Response(data, status=status.HTTP_201_CREATED)
 
-class ProductListView(ListAPIView):
-    queryset = Product.objects.all().order_by('-id')
-    serializer_class = ProductSerializer
-    pagination_class = PageNumberPagination
-    page_size = 10
+# class ProductListView(ListAPIView):#Tested
+#     queryset = Product.objects.all().order_by('-id')
+#     serializer_class = ProductSerializer
+#     pagination_class = PageNumberPagination
+#     page_size = 10
+class ProductListView(APIView):
+    def get(self, request, format=None):
+        # Retrieve all active products
+        active_products = Product.objects.filter(is_active=True)
 
-class ProductDetailView(APIView):
+        # Serialize the active products
+        serializer = ProductSerializer(active_products, many=True)
+
+        # Return the serialized data
+        return Response(serializer.data, status=status.HTTP_200_OK)
+class ProductDetailView(APIView):#Tested
     def get(self, request, pk):   
         product = get_object_or_404(Product, pk=pk)
 
@@ -59,7 +69,7 @@ class ProductDetailView(APIView):
 
         return super().handle_exception(exc)
 
-class AddProductView(APIView):
+class AddProductView(APIView):#Tested
     permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = ProductSerializer(data=request.data)
@@ -68,7 +78,7 @@ class AddProductView(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class EditProductView(APIView):
+class EditProductView(APIView):#Tested
     permission_classes = [IsAuthenticated]
     def put(self, request, product_id):
         try:
@@ -81,7 +91,7 @@ class EditProductView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class DeleteProductView(APIView):
+class DeleteProductView(APIView):#Tested
     permission_classes = [IsAuthenticated]
     def delete(self, request, product_id):
         try:
@@ -91,7 +101,7 @@ class DeleteProductView(APIView):
         product.delete()
         return Response({"detail": "Product deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
     
-class ToggleProductListingView(APIView):
+class ToggleProductListingView(APIView):#Tested
     permission_classes = [IsAuthenticated]
     def patch(self, request, product_id):
         try:
@@ -129,19 +139,39 @@ class ProductAllImagesView(APIView):
 class CartDetailView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        cart = Cart.objects.get(user=request.user)
-        cart_items = CartItem.objects.filter(cart=cart)
-        serializer = CartItemSerializer(cart_items, many=True)
-        return Response(serializer.data)
+        try:
+            cart = Cart.objects.get(user=request.user)
+            cart_items = CartItem.objects.filter(cart=cart)
+            total_count = cart_items.aggregate(total_count=Sum('quantity'))['total_count'] or 0
+            cart_data = {
+                'user': request.user.id,
+                'total_price': cart.total_price,
+                'total_count': total_count,
+                'products': []
+            }
+            for cart_item in cart_items:
+                product_data = {
+                    'product_id': cart_item.product.id,
+                    'name': cart_item.product.name,
+                    'price': cart_item.product.price,
+                    'quantity': cart_item.quantity,
+                    'subtotal': cart_item.product.price * cart_item.quantity
+                }
+                cart_data['products'].append(product_data)
+            return Response(cart_data)
+        except Cart.DoesNotExist:
+            return Response({"detail": "Cart not found for the current user."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"detail": f"An error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class AddToCartView(APIView):
     permission_classes = [IsAuthenticated]
+
     def post(self, request, product_id):
         user = request.user
         product = Product.objects.get(pk=product_id)
         cart, created = Cart.objects.get_or_create(user=user)
         cart_item, created = CartItem.objects.get_or_create(cart=cart, product=product)
-        cart_item.quantity += 1
         cart_item.save()
         serializer = CartSerializer(cart)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -188,6 +218,23 @@ class GetAddressView(APIView):
         else:
             return Response({"detail": "No address found for the user."}, status=status.HTTP_404_NOT_FOUND)
 
+
+class AddAddressView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        print("REached")
+        user_profile = UserProfile.objects.get(user=request.user)
+        request.data['user_profile'] = user_profile.id
+        serializer = AddressSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.validated_data['user_profile'] = user_profile
+            address = Address.objects.create(**serializer.validated_data)
+            serialized_address = AddressSerializer(address)
+            return Response(serialized_address.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 class EditAddressView(APIView):
     permission_classes = [IsAuthenticated]
     def put(self, request, address_id):
@@ -218,20 +265,29 @@ class BuyNowView(APIView):
 
 class CartCheckoutView(APIView):
     permission_classes = [IsAuthenticated]
+
     def post(self, request):
         user = request.user
-        cart = Cart.objects.get(user=user)
-        cart_items = CartItem.objects.filter(cart=cart)
+        try:
+            cart = Cart.objects.get(user=user)
+            cart_items = CartItem.objects.filter(cart=cart)
+        except Cart.DoesNotExist:
+            return Response({"detail": "Empty cart. No items to checkout."}, status=status.HTTP_400_BAD_REQUEST)
+
         order = Order.objects.create(
             user=user,
             total_price=cart.total_price,
         )
+
         for cart_item in cart_items:
             order.products.add(cart_item.product)
+
         cart_items.delete()
+        cart.delete()
+
         serializer = OrderSerializer(order)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-
+    
 class OrderView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
